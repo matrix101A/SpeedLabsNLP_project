@@ -20,7 +20,6 @@ import urllib
 from IPython.display import Image
 
 from IPython.core.debugger import Pdb; 
-!pip install pymssql
 import pymssql
 
 """## Importing CSV data and latex data and merginge them, then perform pre processing to remove duplicate question"""
@@ -529,7 +528,6 @@ merged_test_train_data
 """
 
 # Corpus Processing
-! pip install unidecode
 import re
 import nltk.corpus
 from unidecode                        import unidecode
@@ -2482,7 +2480,6 @@ def getKSCMappings():
 """### Calculating edit distance between KSC to use as an alternate cluster """
 
 def getCustomKSCMappingsEdit():
-  ! pip install Levenshtein
 
   from Levenshtein import distance as levenshtein_distance
 
