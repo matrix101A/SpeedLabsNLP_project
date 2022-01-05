@@ -9,6 +9,7 @@ Original file is located at
 ## Importing Libraries
 """
 
+# Commented out IPython magic to ensure Python compatibility.
 import pandas as pd 
 import numpy as np 
 import json 
@@ -16,13 +17,62 @@ import IPython
 
 from binascii import a2b_base64
 import urllib
+import urllib.request
 
 from IPython.display import Image
 
 from IPython.core.debugger import Pdb; 
+!pip install pymssql
 import pymssql
 
-"""## Importing CSV data and latex data and merginge them, then perform pre processing to remove duplicate question"""
+
+# Corpus Processing
+! pip install unidecode
+import re
+import nltk.corpus
+from unidecode                        import unidecode
+from nltk.tokenize                    import word_tokenize
+from nltk                             import SnowballStemmer
+from sklearn.feature_extraction.text  import TfidfVectorizer
+from sklearn.preprocessing            import normalize
+
+# K-Means
+from sklearn import cluster
+
+# Visualization and Analysis
+import matplotlib.pyplot  as plt
+import matplotlib.cm      as cm
+import seaborn            as sns
+from sklearn.metrics      import silhouette_samples, silhouette_score
+from wordcloud            import WordCloud
+
+# Map Viz
+import folium
+#import branca.colormap as cm
+from branca.element import Figure
+
+import tensorflow as tf
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import re
+import nltk
+import random
+from nltk.corpus import stopwords, twitter_samples
+# from nltk.tokenize import TweetTokenizer
+from sklearn.model_selection import KFold
+from nltk.stem import PorterStemmer
+from string import punctuation
+from sklearn.preprocessing import OneHotEncoder
+from tensorflow.keras.preprocessing.text import Tokenizer
+import time
+
+# %config IPCompleter.greedy=True
+# %config IPCompleter.use_jedi=False
+# nltk.download('twitter_samples')
+
+"""### Cheking if the latex to image conveersion is correct for the question. """
 
 bio_data = pd.read_csv('data-bio.csv')
 bio_data
@@ -38,7 +88,7 @@ image_data[['QuestionId','imageHTML','Q_Latex']].to_csv('questions_with_image.cs
 
 """
 
-# problems in running in colab 
+# This will loop over all images and show its latex and image 
 for index, row in image_data.iterrows():
     image_html = row['imageHTML'];
     image_html=image_html.split('src= "')
@@ -48,19 +98,20 @@ for index, row in image_data.iterrows():
     with open('image.jpg', 'wb') as f:
         f.write(response.file.read())
     question_latex = row['Q_Latex'];
-    print(question_latex)
+    print(question_latex). # print the question latex 
     img = Image(filename='image.jpg') 
-    display(img)    
+    display(img)     # display image 
     Pdb().set_trace()
     # type continue in text box to go to next image, quit() to exit the loop
 
 """### Codes for pre processing and splitting data """
 
+# takes in data with appropiate Example and Trial labels and splits them into train and test data 
 def example_trial_split(data):
 
-  example_data = data[data.UseAs == 'Example']
+  example_data = data[data.UseAs == 'Example'] # Use data with example label 
   print('number of example data are', example_data.shape[0])
-  trial_data = data[data.UseAs == 'Trial']
+  trial_data = data[data.UseAs == 'Trial']  # Use data with trial label 
   print('number of trial data are', trial_data.shape[0])
 
   trial_data.to_csv('trial_data_bio.csv')
@@ -86,6 +137,7 @@ def twoLetters(listOfTokens):
             twoLetterWord.append(token)
     return twoLetterWord
 
+## matrix to store latex keywords and other words which does not add any specific meaning to the question 
 latex_keywords=['begin','end','mathrm','Idots''idots','quad','a','b','c','d','i','ii','iii','iv','vii','longrightarrow',       
                 'hline','rightarrow','column','text','array','begin','end','III','nm','none','one','frac'];
 
@@ -125,8 +177,8 @@ def preProcess(Question_text):
             Question_text[index] = Question_text[index].replace('\\', '')        # Removes \
             Question_text[index] = Question_text[index].replace('\n', '')        # removed newline
             Question_text[index] = Question_text[index].replace('-', '')        # removed newline
-            Question_text[index] = Question_text[index].replace('~', '')        # Removes \
-            Question_text[index] = Question_text[index].replace('=', '')        # Removes \
+            Question_text[index] = Question_text[index].replace('~', '')        # Removes -
+            Question_text[index] = Question_text[index].replace('=', '')        # Removes =
 
 
 
@@ -149,7 +201,9 @@ def preProcess(Question_text):
       
     return Question_text
 
+# Functions for K means visualizations 
 def get_top_features_cluster(tf_idf_array, prediction, n_feats):
+  # returns the top features of a cluster
     labels = np.unique(prediction)
     dfs = []
     for label in labels:
@@ -163,12 +217,14 @@ def get_top_features_cluster(tf_idf_array, prediction, n_feats):
     return dfs
 
 def plotWords(dfs, n_feats):
+  # makes barplot of the top features of a cluster in form a bar plot 
     plt.figure(figsize=(8, 4))
     for i in range(0, len(dfs)):
         plt.title(("Most Common Words in Cluster {}".format(i)), fontsize=10, fontweight='bold')
         sns.barplot(x = 'score' , y = 'features', orient = 'h' , data = dfs[i][:n_feats])
         plt.show()
 
+# get top features of individual cluster 
 def get_top_features_cluster_ind(tf_idf_array, prediction, n_feats,lab):
     labels = np.unique(prediction)
     dfs = []
@@ -178,11 +234,14 @@ def get_top_features_cluster_ind(tf_idf_array, prediction, n_feats,lab):
     sorted_means = np.argsort(x_means)[::-1][:n_feats] # indices with top 20 scores
     features = vectorizer.get_feature_names()
     best_features = [(features[i], x_means[i]) for i in sorted_means]
-    df = pd.DataFrame(best_features, columns = ['features', 'score'])
+    df = pd.DataFrame(best_features, columns = ['features', 'score']) 
     return df
 
+# pre processing step 
+# akes in example and trial data and removes un necessary columns and then renames column, label specifies based on which column 
+# prediction is to be made, eg - KSCName, Chapter etc 
 def preProcessDeepLearning(example_data , trial_data , label):
-  example_data['split']= 'train'
+  example_data['split']= 'train' # use label train for example data 
   test_data = trial_data
   test_data['split'] = 'test'
   merged_test_train_data = example_data.append(test_data)
@@ -199,22 +258,24 @@ def max_length(sequences):
             max_length = length
     return max_length
 
+# function for making prediction from a CNN model 
 def make_pred(model,test_x,corpus):
   tokenizer = Tokenizer(oov_token=oov_tok)
-  tokenizer.fit_on_texts(train_x)
+  tokenizer.fit_on_texts(train_x) # fit tolenizer on test dataset 
   training_sequences = tokenizer.texts_to_sequences(train_x)
-  test_sequences = tokenizer.texts_to_sequences(test_x)
-  max_len = max_length(training_sequences)
+  test_sequences = tokenizer.texts_to_sequences(test_x) #generate sequence out of text 
+  max_len = max_length(training_sequences)  # get max lenghth of question in the corpus
 
 
   Xtest = pad_sequences(test_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
   Xtrain = pad_sequences(test_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
 
 
-  predictions= model.predict(Xtest,verbose= 0 )
-  first_predictions= np.argmax(predictions,axis= 1).tolist()
+  predictions= model.predict(Xtest,verbose= 0 ) # make predictions
+  first_predictions= np.argmax(predictions,axis= 1).tolist() # get prediction of most confidance 
+
   test_corpus = corpus[corpus['split'] == 'test']
-  correct_code = test_corpus['label'].tolist()
+  correct_code = test_corpus['label'].tolist() # correct label
   correct_labels = [chapter_mapping[chapter_mapping['label_code']== pred_label]['label'].tolist()[0]
                             for pred_label in correct_code ]
   first_predicted_labels = [chapter_mapping[chapter_mapping['label_code']== pred_label]['label'].tolist()[0]
@@ -222,8 +283,9 @@ def make_pred(model,test_x,corpus):
   test_corpus['First_prediction'] = first_predicted_labels
   test_corpus['CorrectLabel'] = correct_labels
   test_corpus[test_corpus['First_prediction'] == test_corpus['CorrectLabel']]
-  return test_corpus;
+  return test_corpus;  # test corpus with column for predicted label
 
+# creates a tokenizer to fit on some sequences 
 def create_tokenizer(sentences):
     tokenizer = Tokenizer()
     tokenizer.fit_on_texts(sentences)
@@ -242,7 +304,11 @@ def train_test_split(corpus):
   print('length of train data is - ', len(train_x))
   return train_x,train_y, test_x,test_y
 
-def accuracyTopThreeKSCText():
+# compares top 3 prediction of model with correct KSC and calculates accuracy using 9 models 
+# First using the total subject model we predict the subject of the question 
+# according to subject we choose appropiate models and tokenizer for chapter and KSC predictions 
+# Calculate accuracy based on top 3 KSC prediction and see if any one mathes with correct KSC label  
+def accuracyTopThreeKSCText(Xtest):
 
     pred_seq_wise = []
     for i in range(0,len(Xtest)-1):
@@ -252,20 +318,21 @@ def accuracyTopThreeKSCText():
       subject_pred= model_subjcet_total.predict(test_ques)
       subject_pred= np.argmax(subject_pred,axis= 1).tolist()
       subject_pred=subject_pred[0]
-      pred_subject_label = subject_mapping[subject_mapping['label_code'] == subject_pred].label.tolist()[0]
-      if(pred_subject_label != trial_data.SubjectName.tolist()[i]):
+      pred_subject_label = subject_mapping[subject_mapping['label_code'] == subject_pred].label.tolist()[0] #predicted Subject 
+
+      if(pred_subject_label != trial_data.SubjectName.tolist()[i]): # if subject predicted wrong then return 
         pred_seq_wise.append(0) ;
 
       else :
         if(pred_subject_label == 'Biology'):
           test_ques = tokenizer_bio.texts_to_matrix(ques_text, mode='freq')
-          chapter_pred= model_chapter_bio.predict(test_ques)
-          ksc_model = model_KSC_bio
+          chapter_pred= model_chapter_bio.predict(test_ques)  # seletct appropiate Chapter model 
+          ksc_model = model_KSC_bio # seletct appropiate KSC model 
           pred_prob = chapter_mapping_bio
           ksc_mapping = KSC_mapping_bio
           pred_prob['Probability']=chapter_pred[0]
           valid_chapters = trial_data[trial_data['SubjectName']==pred_subject_label ].ChapterName.unique()
-          pred_chapter_label= pred_prob[pred_prob['label'].isin(valid_chapters)].sort_values('Probability',ascending=False).label.tolist()[0]
+          pred_chapter_label= pred_prob[pred_prob['label'].isin(valid_chapters)].sort_values('Probability',ascending=False).label.tolist()[0]  # predicted chapter label 
 
         elif(pred_subject_label == 'Chemistry'): 
           test_ques = tokenizer_chm.texts_to_matrix(ques_text, mode='freq')
@@ -301,17 +368,18 @@ def accuracyTopThreeKSCText():
             pred_seq_wise.append(0) ;
 
         else: 
-          KSC_pred = ksc_model.predict(test_ques)
+          KSC_pred = ksc_model.predict(test_ques) #predicted kSC label 
           pred_prob = ksc_mapping
           pred_prob['Probability']=KSC_pred[0]
-          valid_KSC = trial_data[trial_data['ChapterName']==pred_chapter_label ].KSCText.unique()
+          valid_KSC = trial_data[trial_data['ChapterName']==pred_chapter_label ].KSCText.unique() # KSC present in the particular chapter predicted before
+                                                                                                # only these KSC will be used for prediction 
           try:
-            correct_KSC = trial_data.KSCText.tolist()[i]
+            correct_KSC = trial_data.KSCText.tolist()[i] # correct KSC label of data 
             correct_KSC_ind=total_KSC_list.index(correct_KSC)
-            pred_KSC_label_first = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[0]
+            pred_KSC_label_first = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[0] # first KSC prediction 
           
-            pred_KSC_label_second = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[1]
-            pred_KSC_label_third = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[2]
+            pred_KSC_label_second = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[1] # Second KSC prediction 
+            pred_KSC_label_third = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[2] # Third KSC prediction 
       
             
             if(pred_KSC_label_first == correct_KSC or pred_KSC_label_second == correct_KSC or pred_KSC_label_third == correct_KSC):
@@ -341,16 +409,12 @@ def accuracyTopThreeKSCText():
                   pred_seq_wise.append(0) ;
 
 
-          try: 
-            if(pred_KSC_label_first != correct_KSC and pred_KSC_label_second == correct_KSC):  # If this happens then the first label 
-                  first_ksc_index =  total_KSC_list.index(pred_KSC_label_first)                 # can be in a cluster with second 
-                  KSC_sim_array[first_ksc_index,correct_KSC_ind] =  KSC_sim_array[first_ksc_index,correct_KSC_ind] + 1
-                  KSC_sim_array[correct_KSC_ind,first_ksc_index] =  KSC_sim_array[correct_KSC_ind,first_ksc_index] + 1
-          except:
-            continue
-    return pred_seq_wise
 
-def accuracyTopThreeKSCClsuter(test_with_cluster):
+    return pred_seq_wise #return array of results for all test data
+
+# compares top 3 cluster prediction of model with correct KSC cluster and calculates accuracy using 9 models 
+# Calculate accuracy based on top 3 KSC Cluster prediction and see if any one mathes with correct Cluster 
+def accuracyTopThreeKSCClsuter(Xtest,test_with_cluster):
   pred_seq_wise = []
 
   for i in range(0, len(Xtest)-1):
@@ -461,13 +525,121 @@ def accuracyTopThreeKSCClsuter(test_with_cluster):
 
 def simple_NN_model(no_label = 10, max_len = 100 ):
     model = tf.keras.models.Sequential([
-        tf.keras.layers.Dense( units=100, activation='relu', input_shape=(max_len,)),
+        tf.keras.layers.Dense( units=100, activation='relu', input_shape=(max_len,)),  # first hidden layer 
+        tf.keras.layers.Dropout(0.5),         # droupout layer
+        tf.keras.layers.Dense( units=no_label, activation='softmax') # prediction layer with activation function
+    ])
+     
+    return model
+
+def two_layer_NN_model(no_label = 10, max_len = 100 ):
+    model = tf.keras.models.Sequential([
+        tf.keras.layers.Dense( units=100, activation='relu', input_shape=(max_len,)),   #first hidden layer 
+        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dense( units=50, activation='relu', input_shape=(max_len,)),    #Second hidden layer  hidden layer 
         tf.keras.layers.Dropout(0.5),
         tf.keras.layers.Dense( units=no_label, activation='softmax')
     ])
     
   
     return model
+
+### CNN model 
+from tensorflow.keras import regularizers
+from tensorflow.keras.constraints import MaxNorm
+
+def define_model_cnn(filters = 100, kernel_size = 3, activation='relu', input_dim = None, output_dim=300, len_max = None, no_labels= 3 ):
+    
+    model = tf.keras.models.Sequential([
+        tf.keras.layers.Embedding(input_dim=vocab_size,     # vocab size - Size of vocabulary, can get this from tokennizer 
+                                  output_dim=output_dim,    # output dim of embedding layer 
+                                  input_length=len_max,     # max length of question in the train corpus 
+                                  input_shape=(len_max, )), 
+        
+        tf.keras.layers.Conv1D(filters=filters, kernel_size = kernel_size, activation = activation, 
+                               # set 'axis' value to the first and second axis of conv1D weights (rows, cols)
+                               kernel_constraint= MaxNorm( max_value=3, axis=[0,1])),
+        
+        tf.keras.layers.MaxPool1D(2),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dense(10, activation=activation, 
+                              # set axis to 0 to constrain each weight vector of length (input_dim,) in dense layer
+                              kernel_constraint = MaxNorm( max_value=3, axis=0)),
+        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dense(units=no_labels, activation='softmax')
+    ])
+    
+    model.compile( loss = 'sparse_categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy'])
+#     model.summary()
+    return model
+
+vocab_size = 5000
+model = define_model_cnn(len_max = 140)
+model.summary()
+
+class myCallback(tf.keras.callbacks.Callback):
+    # Overide the method on_epoch_end() for our benefit
+    def on_epoch_end(self, epoch, logs={}):
+        if (logs.get('accuracy') > 0.99):
+            print("\nReached 93% accuracy so cancelling training!")
+            self.model.stop_training=True
+
+
+callbacks = tf.keras.callbacks.EarlyStopping(monitor='val_accuracy', min_delta=0, 
+                                             patience=20, verbose=2, 
+                                             mode='auto', restore_best_weights=True)
+#callbacks = myCallback()
+
+# Parameter Initialization
+
+def run_cnn_model(no_labels, activation, kernel_size,train_x,test_x,test_y ):
+      trunc_type='post'
+      padding_type='post'
+      oov_tok = "<UNK>"
+      filters = 100
+ 
+
+      columns = ['Activation', 'Filters', 'Acc']
+      record = pd.DataFrame(columns = columns)
+
+
+      # encode data using
+      # Cleaning and Tokenization
+      tokenizer = Tokenizer(oov_token=oov_tok)
+      tokenizer.fit_on_texts(train_x)
+
+      # Turn the text into sequence
+      training_sequences = tokenizer.texts_to_sequences(train_x)
+      test_sequences = tokenizer.texts_to_sequences(test_x)
+
+      max_len = max_length(training_sequences)
+
+      # Pad the sequence to have the same size
+      Xtrain = pad_sequences(training_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
+      Xtest = pad_sequences(test_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
+
+      word_index = tokenizer.word_index
+      vocab_size = len(word_index)+1
+
+      # Define the input shape
+      model = define_model_cnn(filters, kernel_size, activation, input_dim=vocab_size, len_max=max_len,no_labels = no_labels)
+        # Train the model
+      model.fit(Xtrain, train_y, batch_size=50, epochs=60, verbose=2, callbacks=[callbacks], validation_data=(Xtest, test_y))
+
+      # evaluate the model
+      loss, acc = model.evaluate(Xtest, test_y, verbose=0)
+      print('Test Accuracy: {}'.format(acc*100))
+
+      parameters = [activation, kernel_size]
+      entries = parameters + [acc]
+
+      temp = pd.DataFrame([entries], columns=columns)
+      record = record.append(temp, ignore_index=True)
+      print()
+      print(record)
+      print()
+      return  model
 
 """## Creating test and train data for cluster analysis """
 
@@ -523,36 +695,6 @@ no_trial_data = len(trial_data);
 merged_test_train_data = example_data.append(trial_data)
 merged_test_train_data
 
-"""## importing libraries for K means
-
-"""
-
-# Corpus Processing
-import re
-import nltk.corpus
-from unidecode                        import unidecode
-from nltk.tokenize                    import word_tokenize
-from nltk                             import SnowballStemmer
-from sklearn.feature_extraction.text  import TfidfVectorizer
-from sklearn.preprocessing            import normalize
-
-# K-Means
-from sklearn import cluster
-
-# Visualization and Analysis
-import matplotlib.pyplot  as plt
-import matplotlib.cm      as cm
-import seaborn            as sns
-from sklearn.metrics      import silhouette_samples, silhouette_score
-from wordcloud            import WordCloud
-
-# Map Viz
-import folium
-#import branca.colormap as cm
-from branca.element import Figure
-
-merged_test_train_data
-
 # main pre processing step 
 Question_text = merged_test_train_data['Q_Latex'].tolist()
 Question_text= preProcess(Question_text)
@@ -600,7 +742,7 @@ vectorized_example_data = vectorized_question_data[0:no_example_data];
 vectorized_trial_data = vectorized_question_data[no_example_data:];
 kmeans_result = kmeans.fit(vectorized_example_data)    # pass data in form n_samples * n_features
 
-predicted_cluster_labels = kmeans_result.predict(vectorized_question_data)
+predicted_cluster_labels = kmeans_result.predict(vectorized_question_data) # make predictions out of the model 
 n_feats = 20
 dfs = get_top_features_cluster(vectorized_question_data.to_numpy(), predicted_cluster_labels, n_feats)
 plotWords(dfs, 13)
@@ -636,8 +778,9 @@ for i in range(0,num_clusters):
 cluster_label[11] # cluster 11 has a very large number of questions in it. 
                 #This is beacause Principles of Inheritance and Variation has highest contribution in example data
 
-"""### We now check how many chapter can we cover by using the above method. It is seen that we can only cover 9 chapters out ot 27"""
+"""### We now check how many chapter can we cover by using the above method. It is seen that we can only cover 9 chapters out ot 15"""
 
+# printing chapter that could be classified 
 classified_chapters_clusters = np.unique(np.array(cluster_label)).tolist();
 print(classified_chapters_clusters, len(classified_chapters_clusters))
 
@@ -648,6 +791,7 @@ example_data.ChapterName.unique().tolist()
 classfied_chapters_df= example_data[example_data['ChapterName'].isin(classified_chapters_clusters)]
 classfied_chapters_df = classfied_chapters_df.groupby('ChapterName').count()
 classfied_chapters_df
+# printing propotion of chapter data in our original dataset
 
 """### We can see that only those chapters which have >60 questions in examples data have only been able to be classified by our algorithm 
 
@@ -658,6 +802,7 @@ unclassfied_chapters_df= example_data[[not elem for elem in
                                            example_data['ChapterName'].isin(classified_chapters_clusters).tolist()]]
 unclassfied_chapters_df=  unclassfied_chapters_df.groupby('ChapterName').count()
 unclassfied_chapters_df
+# propotion of chapter which could not be classified
 
 """### We can see that topics not classified by this algorithm has <60 questions, this means that we need more questions from these topics to classify them correctly
 
@@ -667,11 +812,13 @@ unclassfied_chapters_df
 """
 
 trial_data
-vectorized_trial_data= vectorized_trial_data[trial_data['ChapterName'].isin(classified_chapters_clusters).tolist()];
+vectorized_trial_data= vectorized_trial_data[trial_data['ChapterName'].isin(classified_chapters_clusters).tolist()]; # taking only test data for which we have clusters 
 trial_data_filtered = trial_data[trial_data['ChapterName'].isin(classified_chapters_clusters)]
 vectorized_trial_data
 
-predicted_cluster_labels = kmeans_result.predict(vectorized_trial_data)
+predicted_cluster_labels = kmeans_result.predict(vectorized_trial_data) # making predictions from test data
+
+trial_data_filtered_prediction.ChapterName.unique()
 
 """### We see what chapter the clustering algorithm predicts for us using the test data """
 
@@ -685,7 +832,7 @@ trial_data_filtered_prediction
 correct_predictions = trial_data_filtered_prediction[trial_data_filtered_prediction[
     'ChapterName']==trial_data_filtered_prediction['predicted_chapter']]
 
-test_acctracy = correct_predictions.shape[0]/trial_data_filtered_prediction.shape[0]
+test_acctracy = correct_predictions.shape[0]/trial_data_filtered_prediction.shape[0]  # calculating accuacy 
 print('Accuracy for classfing test data is', test_acctracy* 100)
 
 """### Most of the incorrect predictions are into the chapter Principles of Inheritance and Variation. This may be because it forms a huge chunk of our example data"""
@@ -696,54 +843,30 @@ print('Number of incorrect predictions',incorrect_predictions.shape[0]);
 print('Incorrect Predictions to Principles of Inheritance and Variation-',
       sum(incorrect_predictions['predicted_chapter']=='Principles of Inheritance and Variation'))
 
-"""###  Notes - 
-###  There is a need to standardize example data from all topic, currently one topic test data dominates the other
+"""## Using Deep learning techniques
 
-### We can strenthen the 20 limit for min number of questions from a topic
-
-## Using Deep learning techniques
-
-#### Import libraries
+### doing preprocessing
 """
 
-# Commented out IPython magic to ensure Python compatibility.
-import tensorflow as tf
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import re
-import nltk
-import random
-from nltk.corpus import stopwords, twitter_samples
-# from nltk.tokenize import TweetTokenizer
-from sklearn.model_selection import KFold
-from nltk.stem import PorterStemmer
-from string import punctuation
-from sklearn.preprocessing import OneHotEncoder
-from tensorflow.keras.preprocessing.text import Tokenizer
-import time
+trial_data,example_data = example_trial_split(bio_data)  # splitting into trial and example data 
 
-# %config IPCompleter.greedy=True
-# %config IPCompleter.use_jedi=False
-# nltk.download('twitter_samples')
+label_name= 'ChapterName'; # label name is the column used for prediction
 
-"""### doing preprocessing"""
 
-merged_test_train_data= preProcessDeepLearning(example_data,trial_data,'ChapterName') 
+merged_test_train_data= preProcessDeepLearning(example_data,trial_data,label_name) 
 # pass the chapter which you want as label in you data 
 # it gives the merged train and test data with appropiate column nanmes 
 
 uniq_label_list = merged_test_train_data['label'].unique().tolist()
 no_labels = len(uniq_label_list)
 merged_test_train_data['label_code'] = [uniq_label_list.index(label) for label in merged_test_train_data['label'].tolist()] 
-chapter_mapping= merged_test_train_data[['label','label_code']]
+chapter_mapping= merged_test_train_data[['label','label_code']] # defining chapter_mappings beween chapterName and chapter label
 
 corpus=  merged_test_train_data 
 corpus['label'] = corpus['label_code']
 corpus.drop('label_code',axis= 1, inplace = True)
 
-corpus ## This is final data to be used
+chapter_mapping
 
 """Preparing dataset for model
 
@@ -751,98 +874,14 @@ corpus ## This is final data to be used
 
 """
 
-
-
-train_x,train_y, test_x, test_y = train_test_split(corpus)
-
+train_x,train_y, test_x, test_y = train_test_split(corpus) # split data into test and train 
 # do some custom pre processing
-train_x= preProcess(train_x)
-test_x  = preProcess(test_x)
+print(train_x[4])
+train_x= preProcess(train_x)  # pre processing train data 
+test_x  = preProcess(test_x)  # pre processing test data 
 train_x[4]
 
-"""### Tokenizing data and padding """
-
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-
-trunc_type='post'
-padding_type='post'
-oov_tok = "<UNK>"
-
-# Cleaning and Tokenization
-tokenizer = Tokenizer(oov_token=oov_tok)
-tokenizer.fit_on_texts(train_x)
-
-print("Example of sentence: ", train_x[4])
-
-# Turn the text into sequence
-training_sequences = tokenizer.texts_to_sequences(train_x)
-max_len = max_length(training_sequences)
-
-print('Into a sequence of int:', training_sequences[4])
-
-# Pad the sequence to have the same size
-training_padded = pad_sequences(training_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
-print('Into a padded sequence:', training_padded[4])
-
-# See the first 10 words in the vocabulary
-
-word_index = tokenizer.word_index
-for i, word in enumerate(word_index):
-    print(word, word_index.get(word))
-    if i==9:
-        break
-vocab_size = len(word_index)+1
-print(vocab_size)
-
-"""### Defining model  and callbacks"""
-
-from tensorflow.keras import regularizers
-from tensorflow.keras.constraints import MaxNorm
-
-def define_model_cnn(filters = 100, kernel_size = 3, activation='relu', input_dim = None, output_dim=300, len_max = None, no_labels= 3 ):
-    
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.Embedding(input_dim=vocab_size, 
-                                  output_dim=output_dim, 
-                                  input_length=len_max, 
-                                  input_shape=(len_max, )),
-        
-        tf.keras.layers.Conv1D(filters=filters, kernel_size = kernel_size, activation = activation, 
-                               # set 'axis' value to the first and second axis of conv1D weights (rows, cols)
-                               kernel_constraint= MaxNorm( max_value=3, axis=[0,1])),
-        
-        tf.keras.layers.MaxPool1D(2),
-        tf.keras.layers.Flatten(),
-        tf.keras.layers.Dropout(0.5),
-        tf.keras.layers.Dense(10, activation=activation, 
-                              # set axis to 0 to constrain each weight vector of length (input_dim,) in dense layer
-                              kernel_constraint = MaxNorm( max_value=3, axis=0)),
-        tf.keras.layers.Dropout(0.5),
-        tf.keras.layers.Dense(units=no_labels, activation='softmax')
-    ])
-    
-    model.compile( loss = 'sparse_categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy'])
-#     model.summary()
-    return model
-
-model_0 = define_model_cnn( input_dim=1000, len_max=100, no_labels=10 )
-model_0.summary()
-
-class myCallback(tf.keras.callbacks.Callback):
-    # Overide the method on_epoch_end() for our benefit
-    def on_epoch_end(self, epoch, logs={}):
-        if (logs.get('accuracy') > 0.93):
-            print("\nReached 93% accuracy so cancelling training!")
-            self.model.stop_training=True
-
-
-callbacks = tf.keras.callbacks.EarlyStopping(monitor='val_accuracy', min_delta=0, 
-                                             patience=20, verbose=2, 
-                                             mode='auto', restore_best_weights=True)
-# callbacks = myCallback()
-
-"""### Testing different kernel sizes"""
+"""### Testing different kernel sizes for our model by looping over different activation and kernel sizes, we take the one giving best accuracy """
 
 # Parameter Initialization
 trunc_type='post'
@@ -897,64 +936,22 @@ for activation in activations:
         print()
 
 record.sort_values(by='Acc', ascending=False)
+# sorting models according to their accuracy on bio dataset
 
-"""### Run model on bio data """
+"""### why tanh gives better accuracy in prediction(output) layer
 
-# Parameter Initialization
+### we obeserve that tanh activation with kernel size = 1 gives us the best accuracy among all models, so we use this in all future applications
 
-def run_cnn_model(no_labels, activation, kernel_size,train_x,test_x,train_test =''):
-      trunc_type='post'
-      padding_type='post'
-      oov_tok = "<UNK>"
-      filters = 100
- 
+### Run model on bio data
+"""
 
-      columns = ['Activation', 'Filters', 'Acc']
-      record = pd.DataFrame(columns = columns)
+model_bio_cnn=  run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x,test_y=test_y)
 
-
-      # encode data using
-      # Cleaning and Tokenization
-      tokenizer = Tokenizer(oov_token=oov_tok)
-      tokenizer.fit_on_texts(train_x)
-
-      # Turn the text into sequence
-      training_sequences = tokenizer.texts_to_sequences(train_x)
-      test_sequences = tokenizer.texts_to_sequences(test_x)
-
-      max_len = max_length(training_sequences)
-
-      # Pad the sequence to have the same size
-      Xtrain = pad_sequences(training_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
-      Xtest = pad_sequences(test_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
-
-      word_index = tokenizer.word_index
-      vocab_size = len(word_index)+1
-
-      # Define the input shape
-      model = define_model_cnn(filters, kernel_size, activation, input_dim=vocab_size, len_max=max_len,no_labels = no_labels)
-        # Train the model
-      model.fit(Xtrain, train_y, batch_size=50, epochs=60, verbose=2, callbacks=[callbacks], validation_data=(Xtest, test_y))
-
-      # evaluate the model
-      loss, acc = model.evaluate(Xtest, test_y, verbose=0)
-      print('Test Accuracy: {}'.format(acc*100))
-
-      parameters = [activation, kernel_size]
-      entries = parameters + [acc]
-
-      temp = pd.DataFrame([entries], columns=columns)
-      record = record.append(temp, ignore_index=True)
-      print()
-      print(record)
-      print()
-      return  model
-
-model_bio=  run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x)
+model_bio_cnn.summary()
 
 """### make pred"""
 
-predicted_df = make_pred(model_bio,test_x= test_x, corpus= corpus)
+predicted_df = make_pred(model_bio_cnn,test_x= test_x, corpus= corpus)
 predicted_df
 
 predicted_df[predicted_df['First_prediction'] != predicted_df['CorrectLabel']]
@@ -963,21 +960,19 @@ predicted_df[predicted_df['First_prediction'] != predicted_df['CorrectLabel']]
 
 chm_data = pd.read_csv('data-chm.csv')
 phy_data = pd.read_csv('data-phy.csv')
-chm_data.rename(columns={'Q_LATEX':'Q_Latex'},inplace = True)
+chm_data.rename(columns={'Q_LATEX':'Q_Latex'},inplace = True) # renaming columns according to convention
 
 """### Analysis for CHM data """
 
-example_data,trial_data = example_trial_split(chm_data)
+trial_data,example_data = example_trial_split(chm_data) # splitting into test and example data 
 # exploring the example_data 
 print('Number of topics covered by example data',(example_data['TopicName'].unique()).shape[0])
 print('Number of Chapters covered by example data',(example_data['ChapterName'].unique()).shape[0])
 print('Number of KSC covered by example data',(example_data['KSCText'].unique()).shape[0])
 print('Questions lacking latex data ', sum(pd.isnull(example_data['Q_Latex'])) )
 
-
-
 label_name= 'ChapterName'; # label based on which we need to classify the data 
-merged_test_train_data= preProcessDeepLearning(example_data,trial_data,label_name) 
+merged_test_train_data= preProcessDeepLearning(example_data,trial_data,label_name) # doing processing for deeep learning model 
 # pass the chapter which you want as label in you data 
 # it gives the merged train and test data with appropiate column nanmes 
 uniq_label_list = merged_test_train_data['label'].unique().tolist()
@@ -992,17 +987,21 @@ print('No of unique',label_name, 'are',no_labels)
 corpus ## This is final data to be used
 
 train_x,train_y, test_x, test_y = train_test_split(corpus)
+# do some custom pre processing
+train_x= preProcess(train_x)
+test_x  = preProcess(test_x)
+train_x[4]
 
-model_chm =  run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x)
+model_chm_cnn =  run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x, test_y = test_y)
 
 """### Accuracy before custom pre processing - 72 %
 ### Accuracy of custom pre processed data - 80 %
 """
 
-predicted_df = make_pred(model_chm,test_x= test_x, corpus= corpus)
+predicted_df = make_pred(model_chm_cnn,test_x= test_x, corpus= corpus) # making predictions 
 predicted_df
 
-predicted_df[predicted_df['First_prediction'] != predicted_df['CorrectLabel']]
+predicted_df[predicted_df['First_prediction'] != predicted_df['CorrectLabel']]  # anlyzing wrong predictions
 
 """### Topics not correctly classified belong to very silimar other topics, some are even same with slight spelling differences, eg Alcohol, Phenols and Ethers	and Alcohols, Phenols and Ethers
 
@@ -1010,7 +1009,7 @@ predicted_df[predicted_df['First_prediction'] != predicted_df['CorrectLabel']]
 """
 
 phy_data.rename(columns={'Q_LATEX':'Q_Latex'},inplace = True)
-example_data,trial_data = example_trial_split(phy_data)
+trial_data,example_data = example_trial_split(phy_data)
 
 
 
@@ -1036,13 +1035,20 @@ print('No of unique',label_name, 'are',no_labels)
 corpus ## This is final data to be used
 
 train_x,train_y, test_x, test_y = train_test_split(corpus)
+# do some custom pre processing
+train_x= preProcess(train_x)
+test_x  = preProcess(test_x)
+train_x[4]
+train_x
 
-model_phy =  run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x)
+model_phy =  run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x, test_y = test_y)
 
 pred_df = make_pred(model_phy,test_x,corpus)
-pred_df
 
-"""### Validation accuracy is stuck at 36 % with sigmoid filter, accuracy around 60% with tanh
+predicted_df[predicted_df['First_prediction'] != predicted_df['CorrectLabel']]
+
+"""### Validation accuracy is stuck at 36 % with sigmoid filter, accuracy around 60% with tanh 
+### Accuracy for physcs chapter is less than other subject whereas KSC accuracy is higher. This can be due to small dataset and very similar chapter/KSC level data
 
 ### Doing analysis for total dataset
 
@@ -1051,19 +1057,7 @@ pred_df
 
 total_data= pd.read_csv('total_data.csv')
 total_data.rename(columns={'Q_LATEX':'Q_Latex'},inplace = True)
-example_data,trial_data = example_trial_split(total_data)
-
-
-
-# exploring the example_data 
-print('Number of topics covered by example data',(example_data['TopicName'].unique()).shape[0])
-print('Number of Chapters covered by example data',(example_data['ChapterName'].unique()).shape[0])
-print('Number of KSC covered by example data',(example_data['KSCText'].unique()).shape[0])
-print('Questions lacking latex data ', sum(pd.isnull(example_data['Q_Latex'])) )
-total_data
-
-total_data.rename(columns={'Q_LATEX':'Q_Latex'},inplace = True)
-example_data,trial_data = example_trial_split(total_data)
+trial_data, example_data = example_trial_split(total_data)
 
 
 
@@ -1090,10 +1084,10 @@ print('No of unique',label_name, 'are',no_labels)
 corpus ## This is final data to be used
 
 train_x,train_y, test_x, test_y = train_test_split(corpus)
+train_x= preProcess(train_x)
+test_x  = preProcess(test_x)
 
-model_total_chapter = run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x,train_test= train_test)
-
-"""### Predicting KSC of question, by first predicting chapterName and then KSC """
+model_total_chapter = run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x,test_y = test_y)
 
 chapter_model = model
 predictions= model.predict(Xtest,verbose= 0 )
@@ -1112,129 +1106,42 @@ test_corpus[test_corpus['First_prediction'] == test_corpus['ChapterName']]
 
 """### Training on biology data for KSC """
 
-merged_test_train_data = example_data.append(trial_data)
-merged_test_train_data
-
-example_data['split']= 'train'
-test_data = trial_data
-test_data['split'] = 'test'
-merged_test_train_data = example_data.append(trial_data)
-merged_test_train_data
+data_bio= pd.read_csv('data-bio.csv')
+trial_data, example_data = example_trial_split(data_bio)
 
 print('Number of topics covered by example data',(example_data['TopicName'].unique()).shape[0])
 print('Number of Chapters covered by example data',(example_data['ChapterName'].unique()).shape[0])
 print('Number of KSC covered by example data',(merged_test_train_data['KSCText'].unique()).shape[0])
 print('Questions lacking latex data ', sum(pd.isnull(example_data['Q_Latex'])) )
 
-"""### Some of the KSC around 20 are not even present in the example data """
+label_name = 'KSCText'
+merged_test_train_data= preProcessDeepLearning(example_data,trial_data,label_name)
 
-merged_test_train_data =merged_test_train_data[['Q_Latex','KSCText','split']]
-merged_test_train_data.rename(columns = {'Q_Latex':'sentence',	'KSCText':'label'}, inplace = True)
-uniq_chapte_list = merged_test_train_data['label'].unique().tolist()
-merged_test_train_data['KSC_code'] = [uniq_chapte_list.index(chapterName) for chapterName in merged_test_train_data['label'].tolist()] 
+# pass the chapter which you want as label in you data 
+# it gives the merged train and test data with appropiate column nanmes 
+uniq_label_list = merged_test_train_data['label'].unique().tolist()
+no_labels = len(uniq_label_list)
+merged_test_train_data['label_code'] = [uniq_label_list.index(label) for label in merged_test_train_data['label'].tolist()] 
+KSC_mapping_bio= merged_test_train_data[['label','label_code']]
 
-corpus= merged_test_train_data
-ksc_mapping= corpus[['label','KSC_code']]
-corpus['label'] = corpus['KSC_code']
+corpus=  merged_test_train_data 
+corpus['label'] = corpus['label_code']
+corpus.drop('label_code',axis= 1, inplace = True)
+print('No of unique',label_name, 'are',no_labels)
+corpus ## This is final data to be used 
 
-# Separate the sentences and the labels
-# Separate the sentences and the labels for training and testing
-train_x = list(corpus[corpus.split=='train'].sentence)
-train_y = np.array(corpus[corpus.split=='train'].label)
-print(len(train_x))
-print(len(train_y))
-
-test_x = list(corpus[corpus.split=='test'].sentence)
-test_y = np.array(corpus[corpus.split=='test'].label)
-
-print('Text Before Pre processing - ',train_x[3])
-
+train_x,train_y, test_x, test_y = train_test_split(corpus)
+# do some custom pre processing
 train_x= preProcess(train_x)
 test_x  = preProcess(test_x)
 
-print('Text After Pre processing - ',train_x[3])
 
-print(len(test_x))
-print(len(test_y))
+model_bio_KSC = run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x,test_y = test_y)
 
-from tensorflow.keras import regularizers
-from tensorflow.keras.constraints import MaxNorm
+"""### Some of the KSC around 20 are not even present in the example data
 
-def define_model(filters = 100, kernel_size = 3, activation='relu', input_dim = None, output_dim=300, max_length = None, no_labels = 3 ) :
-    
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.Embedding(input_dim=vocab_size, 
-                                  output_dim=output_dim, 
-                                  input_length=max_length, 
-                                  input_shape=(max_length, )),
-        
-        tf.keras.layers.Conv1D(filters=filters, kernel_size = kernel_size, activation = activation, 
-                               # set 'axis' value to the first and second axis of conv1D weights (rows, cols)
-                               kernel_constraint= MaxNorm( max_value=3, axis=[0,1])),
-        
-        tf.keras.layers.MaxPool1D(2),
-        tf.keras.layers.Flatten(),
-        tf.keras.layers.Dropout(0.5),
-        tf.keras.layers.Dense(10, activation=activation, 
-                              # set axis to 0 to constrain each weight vector of length (input_dim,) in dense layer
-                              kernel_constraint = MaxNorm( max_value=3, axis=0)),
-        tf.keras.layers.Dropout(0.5),
-        tf.keras.layers.Dense(units=no_labels, activation='softmax')
-    ])
-    
-    model.compile( loss = 'sparse_categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy'])
-#     model.summary()
-    return model
-
-# Parameter Initialization
-trunc_type='post'
-padding_type='post'
-oov_tok = "<UNK>"
-activation = 'tanh'
-filters = 100
-kernel_size = 1
-
-columns = ['Activation', 'Filters', 'Acc']
-record = pd.DataFrame(columns = columns)
-
-
-# encode data using
-# Cleaning and Tokenization
-tokenizer = Tokenizer(oov_token=oov_tok)
-tokenizer.fit_on_texts(train_x)
-
-# Turn the text into sequence
-training_sequences = tokenizer.texts_to_sequences(train_x)
-test_sequences = tokenizer.texts_to_sequences(test_x)
-
-max_len = max_length(training_sequences)
-
-# Pad the sequence to have the same size
-Xtrain = pad_sequences(training_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
-Xtest = pad_sequences(test_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
-
-word_index = tokenizer.word_index
-vocab_size = len(word_index)+1
-
-# Define the input shape
-model = define_model(filters, kernel_size, activation, input_dim=vocab_size, max_length=max_len,no_labels = no_labels)
-  # Train the model
-model.fit(Xtrain, train_y, batch_size=50, epochs=60, verbose=2, callbacks=[callbacks], validation_data=(Xtest, test_y))
-
-# evaluate the model
-loss, acc = model.evaluate(Xtest, test_y, verbose=0)
-print('Test Accuracy: {}'.format(acc*100))
-
-parameters = [activation, kernel_size]
-entries = parameters + [acc]
-
-temp = pd.DataFrame([entries], columns=columns)
-record = record.append(temp, ignore_index=True)
-print()
-print(record)
-print()
-
-"""### We have very low accuracy for KSC, this seems to be due to lack of KSC data in our dataset """
+### We have very low accuracy for KSC, this seems to be due to lack of KSC data in our dataset
+"""
 
 ### doing Topic  and subject classification 
 
@@ -1303,8 +1210,9 @@ pred_df
 """
 
 ### doing Topic  and subject classification 
+label_name = 'TopicName'
 
-merged_test_train_data =merged_test_train_data[['Q_Latex','TopicName','split']]
+merged_test_train_data =merged_test_train_data[['Q_Latex',label_name,'split']]
 merged_test_train_data.rename(columns = {'Q_Latex':'sentence',	'TopicName':'label'}, inplace = True)
 uniq_chapte_list = merged_test_train_data['label'].unique().tolist()
 merged_test_train_data['Topic_code'] = [uniq_chapte_list.index(chapterName) for chapterName in merged_test_train_data['label'].tolist()] 
@@ -1336,86 +1244,15 @@ print(len(test_x))
 print(len(test_y))
 print('Number of labels', no_labels)
 
-# Parameter Initialization
-trunc_type='post'
-padding_type='post'
-oov_tok = "<UNK>"
-activation = 'tanh'
-filters = 100
-kernel_size = 1
+model_total_topic = run_cnn_model(no_labels= no_labels, activation= 'tanh', kernel_size = 1,train_x=train_x ,test_x= test_x,train_test= train_test)
 
-columns = ['Activation', 'Filters', 'Acc']
-record = pd.DataFrame(columns = columns)
+pred_df = make_pred(model_total_subject,test_x,corpus)
+pred_df
 
-
-# encode data using
-# Cleaning and Tokenization
-tokenizer = Tokenizer(oov_token=oov_tok)
-tokenizer.fit_on_texts(train_x)
-
-# Turn the text into sequence
-training_sequences = tokenizer.texts_to_sequences(train_x)
-test_sequences = tokenizer.texts_to_sequences(test_x)
-
-max_len = max_length(training_sequences)
-
-# Pad the sequence to have the same size
-Xtrain = pad_sequences(training_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
-Xtest = pad_sequences(test_sequences, maxlen=max_len, padding=padding_type, truncating=trunc_type)
-
-word_index = tokenizer.word_index
-vocab_size = len(word_index)+1
-
-# Define the input shape
-model = define_model(filters, kernel_size, activation, input_dim=vocab_size, max_length=max_len,no_labels = no_labels)
-  # Train the model
-model.fit(Xtrain, train_y, batch_size=50, epochs=60, verbose=2, callbacks=[callbacks], validation_data=(Xtest, test_y))
-
-# evaluate the model
-loss, acc = model.evaluate(Xtest, test_y, verbose=0)
-print('Test Accuracy: {}'.format(acc*100))
-
-parameters = [activation, kernel_size]
-entries = parameters + [acc]
-
-temp = pd.DataFrame([entries], columns=columns)
-record = record.append(temp, ignore_index=True)
-print()
-print(record)
-print()
-
-topic_model = model 
-predictions= model.predict(Xtest,verbose= 0 )
-first_predictions= np.argmax(predictions,axis= 1).tolist()
-test_corpus = corpus[corpus['split'] == 'test']
-correct_code = test_corpus['Topic_code'].tolist()
-correct_labels = [topic_mapping[topic_mapping['Topic_code']== pred_label]['label'].tolist()[0]
-                          for pred_label in correct_code ]
-first_predicted_labels = [topic_mapping[topic_mapping['Topic_code']== pred_label]['label'].tolist()[0]
-                          for pred_label in first_predictions ]
-first_predicted_labels[0:10]
-
-test_corpus['First_prediction'] = first_predicted_labels
-test_corpus['TopicName'] = correct_labels
-test_corpus[test_corpus['First_prediction'] == test_corpus['TopicName']]
-
-test_corpus[test_corpus['First_prediction'] != test_corpus['TopicName']]
-
-"""### SUMMARAY 
-### Accuracy for Subject = 99%
-### Accuracy for Topic = 73 %
-### Accuract for chapter = 72%
-### accuracy for KSC = 12 %
-
-### Accuracy for top 5 KSC 
-### predict KSC on basis of chapter predicted, use KSC only present in that chapter
-### Pick a simple NN and see how it performs
-
-## Using a 2 layer NN for prediction
-"""
+"""## Using a 2 layer NN for prediction """
 
 model_NN = simple_NN_model();
-model_NN.summary()
+model_NN.summary() # summary of our 1 layer NN model
 
 """### Analysis for total dataset"""
 
@@ -1454,30 +1291,32 @@ print('Text After Pre processing - ',train_x[3])
 tokenizer_total = create_tokenizer(train_x)
     
 # encode data using freq mode
-Xtrain = tokenizer_total.texts_to_matrix(train_x, mode='freq')
+Xtrain = tokenizer_total.texts_to_matrix(train_x, mode='freq')  # tokenize data 
 Xtest = tokenizer_total.texts_to_matrix(test_x, mode='freq')
 
-model_chapter_total = simple_NN_model(no_labels,len(Xtest[0]))
+model_chapter_total = simple_NN_model(no_labels,len(Xtest[0])) # initialize model 
+# set training parameters 
 batch_size = 50
 epochs = 60
 verbose =2
+# compile model 
 model_chapter_total.compile( loss = 'sparse_categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy'])
+# fit model 
 model_chapter_total.fit(Xtrain, train_y, batch_size, epochs, verbose,callbacks=[callbacks], validation_data=(Xtest, test_y))
 
-
+# get loass and accuracy for the trained model 
 loss, acc = model_chapter_total.evaluate(Xtest, test_y, verbose=0)
 print('Test Accuracy: {}'.format(acc*100))
 
-predictions= model_chapter_total.predict(Xtest,verbose= 0 )
-first_predictions= np.argmax(predictions,axis= 1).tolist()
-first_predictions[0:10]
+predictions= model_chapter_total.predict(Xtest,verbose= 0 )  # make predictions from the model 
+first_predictions= np.argmax(predictions,axis= 1).tolist()  # get best prediction
+
 test_corpus = corpus[corpus['split'] == 'test']
 correct_code = test_corpus['label'].tolist()
 correct_labels = [chapter_mapping[chapter_mapping['label_code']== pred_label]['label'].tolist()[0]
                           for pred_label in correct_code ]
 first_predicted_labels = [chapter_mapping[chapter_mapping['label_code']== pred_label]['label'].tolist()[0]
                           for pred_label in first_predictions ]
-first_predicted_labels[0:10]
 
 test_corpus['First_prediction'] = first_predicted_labels
 test_corpus['labelName'] = correct_labels
@@ -1607,17 +1446,20 @@ batch_size = 50
 epochs = 60
 verbose =2
 model_subjcet_total.compile( loss = 'sparse_categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy'])
-model_subjcet_total.fit(Xtrain, train_y, batch_size, epochs, verbose,callbacks=[callbacks], validation_data=(Xtest, test_y))
+model_subjcet_total.fit(Xtrain, train_y, batch_size, epochs, verbose, validation_data=(Xtest, test_y))
 
 loss, acc = model_subjcet_total.evaluate(Xtest, test_y, verbose=0)
 print('Test Accuracy: {}'.format(acc*100))
 
 """### Using all three models to make prediction"""
 
-chapter_mapping= chapter_mapping.drop_duplicates(subset ="label")
+chapter_mapping= chapter_mapping.drop_duplicates(subset ="label") # drop duplicate chapter list from mappings 
 KSC_mapping= KSC_mapping.drop_duplicates(subset ="label")
 subject_mapping= subject_mapping.drop_duplicates(subset ="label")
 
+# Use the 3 models described above to evaluate on test data 
+# predict subject chapter and KSC
+# if any of the top 3 prediced KSC match correct one the mark as 1 else 0 
 pred_seq_wise = []
 for i in range(0, len(Xtest)-1):
   x_test = Xtest[i:i +1]
@@ -1675,12 +1517,7 @@ for i in range(0, len(Xtest)-1):
 
 print('Accuracy with top 3 KSC is',sum(pred_seq_wise)/len(pred_seq_wise) * 100)
 
-"""### see at KSC cluster level 
-### do for math data also 
-### Try simpler NN
-
-### Analysis for math data
-"""
+"""### Analysis for math data """
 
 # load total dataset 
 mth_data = pd.read_csv('data-mth.csv')
@@ -1859,7 +1696,7 @@ batch_size = 50
 epochs = 60
 verbose =2
 model_chapter_bio.compile( loss = 'sparse_categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy'])
-model_chapter_bio.fit(Xtrain, train_y, batch_size, epochs, verbose,callbacks=[callbacks], validation_data=(Xtest, test_y))
+model_chapter_bio.fit(Xtrain, train_y, batch_size, epochs, verbose,callbacks=None, validation_data=(Xtest, test_y))
 
 
 
@@ -2210,7 +2047,7 @@ test_corpus[test_corpus['First_prediction'] != test_corpus['labelName']]
 
 """## Use all 9 models to make prediction"""
 
-chapter_mapping_total= chapter_mapping.drop_duplicates(subset ="label")
+chapter_mapping_total= chapter_mapping.drop_duplicates(subset ="label") # dropping duplicate chapter mappings 
 KSC_mapping_total= KSC_mapping.drop_duplicates(subset ="label")
 subject_mapping_total= subject_mapping.drop_duplicates(subset ="label")
 
@@ -2254,6 +2091,12 @@ tokenizer_bio
 tokenizer_math
 tokenizer_total
 
+
+# defining KSC similarity array to get similarity between KSCs using different metrics 
+total_KSC = len(KSC_mapping_total)
+KSC_sim_array = np.zeros((total_KSC,total_KSC), dtype=int, order='C') # smilarity between KSC based on misclassifications
+total_KSC_list = KSC_mapping_total.label.tolist()  # list of all KSC in our data
+
 total_data = pd.read_csv('total_data.csv')
 trial_data, example_data = example_trial_split(total_data)
 
@@ -2291,101 +2134,8 @@ tokenizer_total = create_tokenizer(train_x)
 Xtrain = tokenizer_total.texts_to_matrix(train_x, mode='freq')
 Xtest = tokenizer_total.texts_to_matrix(test_x, mode='freq')
 
-pred_seq_wise = []
-for i in range(0,len(Xtest)-1):
-  ques_text = test_x[i:i +1]
-  test_ques = tokenizer_total.texts_to_matrix(ques_text, mode='freq')
-
-  subject_pred= model_subjcet_total.predict(test_ques)
-  subject_pred= np.argmax(subject_pred,axis= 1).tolist()
-  subject_pred=subject_pred[0]
-  pred_subject_label = subject_mapping[subject_mapping['label_code'] == subject_pred].label.tolist()[0]
-  if(pred_subject_label != trial_data.SubjectName.tolist()[i]):
-    pred_seq_wise.append(0) ;
-
-  else :
-    if(pred_subject_label == 'Biology'):
-      test_ques = tokenizer_bio.texts_to_matrix(ques_text, mode='freq')
-      chapter_pred= model_chapter_bio.predict(test_ques)
-      ksc_model = model_KSC_bio
-      pred_prob = chapter_mapping_bio
-      ksc_mapping = KSC_mapping_bio
-      pred_prob['Probability']=chapter_pred[0]
-      valid_chapters = trial_data[trial_data['SubjectName']==pred_subject_label ].ChapterName.unique()
-      pred_chapter_label= pred_prob[pred_prob['label'].isin(valid_chapters)].sort_values('Probability',ascending=False).label.tolist()[0]
-
-    elif(pred_subject_label == 'Chemistry'): 
-      test_ques = tokenizer_chm.texts_to_matrix(ques_text, mode='freq')
-      chapter_pred= model_chapter_chm.predict(test_ques)
-      ksc_model = model_KSC_chm
-      pred_prob = chapter_mapping_chm
-      ksc_mapping = KSC_mapping_chm
-      pred_prob['Probability']=chapter_pred[0]
-      valid_chapters = trial_data[trial_data['SubjectName']==pred_subject_label ].ChapterName.unique()
-      pred_chapter_label= pred_prob[pred_prob['label'].isin(valid_chapters)].sort_values('Probability',ascending=False).label.tolist()[0]
-
-    elif(pred_subject_label == 'Physics'):
-      test_ques = tokenizer_phy.texts_to_matrix(ques_text, mode='freq')
-      chapter_pred= model_chapter_phy.predict(test_ques)
-      pred_prob = chapter_mapping_phy
-      ksc_model = model_KSC_phy
-      ksc_mapping = KSC_mapping_phy
-      pred_prob['Probability']=chapter_pred[0]
-      valid_chapters = trial_data[trial_data['SubjectName']==pred_subject_label ].ChapterName.unique()
-      pred_chapter_label= pred_prob[pred_prob['label'].isin(valid_chapters)].sort_values('Probability',ascending=False).label.tolist()[0]
-
-    elif(pred_subject_label == 'Maths'):
-      test_ques = tokenizer_math.texts_to_matrix(ques_text, mode='freq')
-      chapter_pred= model_chapter_math.predict(test_ques)
-      pred_prob = chapter_mapping_math
-      ksc_model = model_KSC_math
-      ksc_mapping = KSC_mapping_math
-      pred_prob['Probability']=chapter_pred[0]
-      valid_chapters = trial_data[trial_data['SubjectName']==pred_subject_label ].ChapterName.unique()
-      pred_chapter_label= pred_prob[pred_prob['label'].isin(valid_chapters)].sort_values('Probability',ascending=False).label.tolist()[0]
-
-    if(pred_chapter_label != trial_data.ChapterName.tolist()[i]):
-        pred_seq_wise.append(0) ;
-
-    else: 
-      KSC_pred = ksc_model.predict(test_ques)
-      pred_prob = ksc_mapping
-      pred_prob['Probability']=KSC_pred[0]
-      valid_KSC = trial_data[trial_data['ChapterName']==pred_chapter_label ].KSCText.unique()
-      try:
-        correct_KSC = trial_data.KSCText.tolist()[i]
-
-        pred_KSC_label_first = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[0]
-      
-        pred_KSC_label_second = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[1]
-        pred_KSC_label_third = pred_prob[pred_prob['label'].isin(valid_KSC)].sort_values('Probability',ascending=False).label.tolist()[2]
-  
-        
-        if(pred_KSC_label_first == correct_KSC or pred_KSC_label_second == correct_KSC or pred_KSC_label_third == correct_KSC):
-          result = 1;
-          pred_seq_wise.append(1) ;
-        else :
-          result = 0 ;
-          pred_seq_wise.append(0) ;
-      except :
-        try:
-          if(pred_KSC_label_first == correct_KSC or pred_KSC_label_second == correct_KSC):
-            result = 1;
-            pred_seq_wise.append(1) ;
-          else :
-            result = 0 ;
-            pred_seq_wise.append(0) ;
-            
-        except :
-            if(pred_KSC_label_first == correct_KSC):
-              result = 1;
-              pred_seq_wise.append(1) ;
-            else :
-              result = 0 ;
-              pred_seq_wise.append(0) ;
-
-pred_seq_wise_text = pred_seq_wise
-print('Accuracy with top 3 KSC is',sum(pred_seq_wise)/len(pred_seq_wise) * 100)
+pred_seq_wise_text = accuracyTopThreeKSCText(Xtest) # accuracy when comparing top 3 KSC test labels 
+print('Accuracy with top 3 KSC when matching with text is',sum(pred_seq_wise_text)/len(pred_seq_wise_text) * 100)
 
 """### Using forest regression and other techniques
 
@@ -2445,24 +2195,26 @@ X_test_tfidf = tfidf_transformer.transform(X_test_counts)
 predicted_knn = clf.predict(X_test_tfidf) ## predict nearest neighborus for test data
 print('Accuracy is with Knn is-  ',sum(predicted_knn == test_y)/len(test_y))
 
-"""## Connecting to database to get KSC cluster information"""
+"""## Connecting to database to get KSC cluster information
+## Then we use cluster information to quantify the accuracy of our model 
+"""
 
 def getKSCMappings():
-    conn = pymssql.connect('20.198.89.10', 'Speedlabsread', '$tar@Night', "speedlabs-anon")
+    conn = pymssql.connect('20.198.89.10', 'Speedlabsread', '$tar@Night', "speedlabs-anon") # establishing connection with database 
     cursor = conn.cursor(as_dict=True)
 
-    cursor.execute('SELECT  * FROM KSC ;')
+    cursor.execute('SELECT  * FROM KSC ;')  # select all KSC from database 
     KSC_cluster_id_list= [];
     KSC_text_list= [];
 
     for row in cursor:
-      KSC_cluster_id_list.append(row['KSCClusterId']);
+      KSC_cluster_id_list.append(row['KSCClusterId']); # select cluster id and KSC text 
       KSC_text_list.append( row['KSCText']);
 
     ksc_information_df = pd.DataFrame(list(zip(KSC_text_list,KSC_cluster_id_list)),columns = ['KSCText','ClusterId'])
 
 
-    cursor.execute('SELECT  * FROM KSCCluster;')
+    cursor.execute('SELECT  * FROM KSCCluster;')  # get cluster Name from cluster ID 
     KSC_cluster_id_list= [];
     KSC_cluster_name_list= [];
 
@@ -2475,43 +2227,81 @@ def getKSCMappings():
     ksc_mappings_df = pd.merge(ksc_information_df, ksc_cluster_name_info, on="ClusterId")
     ksc_mappings_df= ksc_mappings_df.drop_duplicates(subset= 'KSCText')
 
-    return ksc_mappings_df
+    return ksc_mappings_df   # data frame containing cluster infromation
 
 """### Calculating edit distance between KSC to use as an alternate cluster """
 
 def getCustomKSCMappingsEdit():
+  ! pip install Levenshtein
 
   from Levenshtein import distance as levenshtein_distance
+ 
 
   len(total_KSC_list)
-  KSC_sim_array_edit = np.zeros((total_KSC,total_KSC), dtype=int, order='C')
+  KSC_sim_array_edit = np.zeros((total_KSC,total_KSC), dtype=int, order='C')  # similary array for KSC based of levenshtein_distance
 
+
+#looping over all KSC and calculating edit distance 
   for i in range(0,total_KSC):
     for j in range(0, total_KSC):
       edit_distance = levenshtein_distance(total_KSC_list[i],total_KSC_list[j])
       KSC_sim_array_edit[i,j] = edit_distance
 
 
-  custom_ksc_mapping = pd.DataFrame(total_KSC_list,columns = ['KSCText'])
+  custom_ksc_mapping = pd.DataFrame(total_KSC_list,columns = ['KSCText'])  # dataframe for cluster KSC mapping 
   custom_ksc_mapping['KSCClusterName']= custom_ksc_mapping.index.tolist()
 
 
+# generate clster based on edit distance cuttoff between two KSC labels 
   for i in range(0,total_KSC):
     for j in range(i+1, total_KSC):
       edit_distance = KSC_sim_array_edit[i,j];
-      if(edit_distance < 5 ):
+      if(edit_distance < 5 ):  # if edit distance< 5 then combine into same cluster 
         custom_ksc_mapping['KSCClusterName'][j] =   custom_ksc_mapping['KSCClusterName'][i];
 
 
   plt.violinplot(dataset=[KSC_sim_array_edit.flatten()])
-  return custom_ksc_mapping
+  return custom_ksc_mapping  # return custom mapping of KSC and kSC cluster
 
-ksc_mappings_df = getCustomKSCMappingsEdit()
+# used any one of the above function to get the cluster mapping 
+# we can also define new functions to give cluster mappings but their output syntax should be same 
+# just change this line and all below analysis can be kept same 
 
-TestWithCluster = createTestWithCluster(ksc_mappings_df)
+ksc_mappings_df = getKSCMappings()  # using edit distance based cluster mappings 
+
+#  ksc_mappings_df = getCustomKSCMappingsEdit()  # using cluster mapping from speed labs database
+
+"""### create revised test dataset based on avaliable cluster information"""
+
+# this function takes in the cluster mappings dataframe and returns the test data compactable with tha mapping 
+# the questions of the returned test data will be only from KSC present in the mappings dataframe 
+# It also prints the stats of how many questions are left after this step 
+def createTestWithCluster(ksc_mappings_df):
+  total_data_cluster= total_data[total_data['KSCText'].isin(ksc_mappings_df.KSCText.tolist())]
+  print('Total Data  ', len(total_data))
+  print('Total test  Data  ', len(total_data[total_data.UseAs == 'Trial']))
+
+  print('Total Data having cluster information is ', len(total_data_cluster))
+
+
+  test_with_cluster = total_data_cluster[total_data_cluster.UseAs == 'Trial']
+  ksc_text = test_with_cluster['KSCText']
+  ksc_cluster_column= [ksc_mappings_df[ksc_mappings_df['KSCText']==ks].KSCClusterName.tolist()[0] for ks in ksc_text]
+  print('Test data with cluster information', len(test_with_cluster))
+
+
+  test_with_cluster['KSCClusterName']= ksc_cluster_column
+  test_with_cluster.to_csv('test_with_cluster.csv')
+  return test_with_cluster
+
+TestWithCluster = createTestWithCluster(ksc_mappings_df)  # get revised test data based on cluster mapping used 
+print('Number of cluster in the test data are ',len(TestWithCluster.KSCClusterName.unique().tolist())) # prints number of cluster in test data
+
+# Do pre processing of data 
+
 
 label_name = 'KSCText'
-merged_test_train_data=preProcessDeepLearning(test_with_cluster,test_with_cluster,label_name)
+merged_test_train_data=preProcessDeepLearning(TestWithCluster,TestWithCluster,label_name)
 
 # pass the chapter which you want as label in you data 
 # it gives the merged train and test data with appropiate column nanmes 
@@ -2537,39 +2327,56 @@ test_x= test_x[0 : round(len(test_x)/2)]
 
 Xtest = tokenizer_total.texts_to_matrix(test_x, mode='freq')
 
-trial_data = test_with_cluster
+trial_data = TestWithCluster
 
-# defining KSC similarity array to get similarity between KSCs using different metrics 
-total_KSC = len(KSC_mapping_total)
-KSC_sim_array = np.zeros((total_KSC,total_KSC), dtype=int, order='C') # smilarity between KSC based on misclassifications
-total_KSC_list = KSC_mapping_total.label.tolist()
+"""### Analysis when using speedlabs cluster information """
 
-def createTestWithCluster(ksc_mappings_df):
-  total_data_cluster= total_data[total_data['KSCText'].isin(ksc_mappings_df.KSCText.tolist())]
-  print('Total Data  ', len(total_data))
-  print('Total Data having cluster information is ', len(total_data_cluster))
-
-
-  test_with_cluster = total_data_cluster[total_data_cluster.UseAs == 'Trial']
-  ksc_text = test_with_cluster['KSCText']
-  ksc_cluster_column= [ksc_mappings_df[ksc_mappings_df['KSCText']==ks].KSCClusterName.tolist()[0] for ks in ksc_text]
-  print('Test data with cluster information', len(test_with_cluster))
-
-
-  test_with_cluster['KSCClusterName']= ksc_cluster_column
-  test_with_cluster.to_csv('test_with_cluster.csv')
-  return test_with_cluster
-
-pred_seq_wise_text = accuracyTopThreeKSCText()
+pred_seq_wise_text = accuracyTopThreeKSCText(Xtest) # accuracy with test data when matching with KSC text only 
 print('Accuracy with top 3 KSC when matching with text is',sum(pred_seq_wise_text)/len(pred_seq_wise_text) * 100)
 
-pred_seq_wise_cluster = accuracyTopThreeKSCClsuter(test_with_cluster)
+pred_seq_wise_cluster = accuracyTopThreeKSCClsuter(Xtest,TestWithCluster) # accuracy of test data when matching Cluster insted of lalel 
 print('Accuracy with top 3 KSC when matching with cluster is',sum(pred_seq_wise_cluster)/len(pred_seq_wise_cluster) * 100)
 
-np.amax(KSC_sim_array,axis =0 )
-np.argmax(KSC_sim_array,axis =0 )
-KSC_sim_array[4,65]
-print(total_KSC_list[4])
-print(total_KSC_list[65])
+"""### Using edit distance for cluster instead of curated clusters from SpeedLabs database"""
 
-"""### We are getting arounud 75 accuracy when comparing to the top 3 KSC cluster """
+ksc_mappings_df =getCustomKSCMappingsEdit()
+TestWithCluster = createTestWithCluster(ksc_mappings_df)
+print('Number of cluster in the test data are ',len(TestWithCluster.KSCClusterName.unique().tolist()))
+
+
+label_name = 'KSCText'
+merged_test_train_data=preProcessDeepLearning(TestWithCluster,TestWithCluster,label_name)
+
+# pass the chapter which you want as label in you data 
+# it gives the merged train and test data with appropiate column nanmes 
+uniq_label_list = merged_test_train_data['label'].unique().tolist()
+no_labels = len(uniq_label_list)
+merged_test_train_data['label_code'] = [uniq_label_list.index(label) for label in merged_test_train_data['label'].tolist()] 
+
+corpus=  merged_test_train_data 
+corpus['label'] = corpus['label_code']
+corpus.drop('label_code',axis= 1, inplace = True)
+print('No of unique',label_name, 'are',no_labels)
+
+## Do pre processing 
+
+# Separate the sentences and the labels
+# Separate the sentences and the labels for training and testing
+
+test_x = list(corpus[corpus.split=='test'].sentence)
+test_y = np.array(corpus[corpus.split=='test'].label)
+
+test_x  = preProcess(test_x)
+test_x= test_x[0 : round(len(test_x)/2)]
+
+Xtest = tokenizer_total.texts_to_matrix(test_x, mode='freq')
+
+trial_data = TestWithCluster
+
+pred_seq_wise_text= accuracyTopThreeKSCText(Xtest)
+print('Accuracy with top 3 KSC when matching with cluster is',sum(pred_seq_wise_text)/len(pred_seq_wise_text) * 100)
+
+pred_seq_wise_cluster = accuracyTopThreeKSCClsuter(Xtest,TestWithCluster)
+print('Accuracy with top 3 KSC when matching with cluster is',sum(pred_seq_wise_cluster)/len(pred_seq_wise_cluster) * 100)
+
+"""### Not much increse in accuracy is observed when using edit distance as metric """
